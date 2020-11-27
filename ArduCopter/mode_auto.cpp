@@ -18,6 +18,8 @@
  *  While in the auto flight mode, navigation or do/now commands can be run.
  *  Code in this file implements the navigation commands
  */
+#define MIN_ANGLE_TO_ROCK_CD        1000    // minimum target angle during TESTING_RATE step that will cause us to move to next step
+#define TARGET_ANGLE_TO_ROCK_CD     2000    // target angle during TESTING_RATE step that will cause us to move to next step
 
 // auto_init - initialise auto controller
 bool ModeAuto::init(bool ignore_checks)
@@ -206,6 +208,10 @@ void ModeAuto::wp_start(const Location& dest_loc)
 {
     _mode = Auto_WP;
 
+    //TM
+    copter.rock_first_iter = true;
+    copter.rock_running = false;
+    
     // send target to waypoint controller
     if (!wp_nav->set_wp_destination(dest_loc)) {
         // failure to set destination can only be because of missing terrain data
@@ -757,7 +763,13 @@ void ModeAuto::wp_run()
             auto_yaw.set_mode(AUTO_YAW_HOLD);
         }
     }
+    //auto_yaw.set_mode(AUTO_YAW_HOLD);
+    
+    static float target_angle;
+    static float lean_angle, start_angle;
 
+    static bool positive_direction = true;
+    
     // if not armed set throttle to zero and exit immediately
     if (is_disarmed_or_landed()) {
         make_safe_spool_down();
@@ -768,19 +780,53 @@ void ModeAuto::wp_run()
     // set motors to full range
     motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
 
-    // run waypoint controller
-    copter.failsafe_terrain_set_status(wp_nav->update_wpnav());
-
-    // call z-axis position controller (wpnav should have already updated it's alt target)
-    pos_control->update_z_controller();
-
-    // call attitude controller
-    if (auto_yaw.mode() == AUTO_YAW_HOLD) {
-        // roll & pitch from waypoint controller, yaw rate from pilot
-        attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(wp_nav->get_roll(), wp_nav->get_pitch(), target_yaw_rate);
+    // run waypoint controller if not rocking
+    if (!copter.rock_running) {
+        copter.failsafe_terrain_set_status(wp_nav->update_wpnav());
     } else {
-        // roll, pitch from waypoint controller, yaw heading from auto_heading()
-        attitude_control->input_euler_angle_roll_pitch_yaw(wp_nav->get_roll(), wp_nav->get_pitch(), auto_yaw.yaw(), true);
+        const float direction_sign = positive_direction ? 1.0f : -1.0f;
+        
+        if (copter.rock_first_iter) {
+            copter.rock_first_iter = false;
+            
+            // disable rate limits
+            attitude_control->use_sqrt_controller(false);
+            //capture current heading
+            start_angle = copter.ahrs_view->roll_sensor;
+
+            target_angle = constrain_float(ToDeg(attitude_control->max_angle_step_bf_roll())*100.0f, MIN_ANGLE_TO_ROCK_CD, TARGET_ANGLE_TO_ROCK_CD);
+
+            //add rock to current heading
+            //Not sure if I need to change this (from twitch in autotune). Hopefully it just adds to existing rates etc.
+            attitude_control->input_angle_step_bf_roll_pitch_yaw(direction_sign * target_angle, 0.0f, 0.0f);
+        }
+        
+        lean_angle = direction_sign * (copter.ahrs_view->roll_sensor - (int32_t)start_angle);
+        //check if rock angle achieved
+        if (lean_angle >= target_angle) {
+            copter.rock_running = false;
+            copter.rock_first_iter = true;
+            // enable rate limits
+            attitude_control->use_sqrt_controller(true);
+            //change direction
+            positive_direction = !positive_direction;
+        }
+    }
+
+
+    //put the below above the rock instructions but below wpnav update?
+    if (!copter.rock_running) {
+        // call z-axis position controller (wpnav should have already updated it's alt target)
+        pos_control->update_z_controller();
+
+        // call attitude controller
+        if (auto_yaw.mode() == AUTO_YAW_HOLD) {
+            // roll & pitch from waypoint controller, yaw rate from pilot
+            attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(wp_nav->get_roll(), wp_nav->get_pitch(), target_yaw_rate);
+        } else {
+            // roll, pitch from waypoint controller, yaw heading from auto_heading()
+            attitude_control->input_euler_angle_roll_pitch_yaw(wp_nav->get_roll(), wp_nav->get_pitch(), auto_yaw.yaw(), true);
+        }
     }
 }
 

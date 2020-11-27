@@ -227,6 +227,14 @@ public:
 
 private:
 
+    //TM variables for rocking
+    const int32_t minimum_height_cm = 1000; //height needed above home to perform rock
+    const int32_t minimum_distance_cm = 500; //distance from next way point required to initiate rock
+    uint32_t time_between_rocks_ms = 20000; //time between rocks in milliseconds
+    uint32_t time_since_last_rock_ms = time_between_rocks_ms; //initialise as time_between_rocks for first iteration to run
+    uint32_t time_of_last_rock_ms = 0;
+    int32_t current_altitude = 0;
+
     // key aircraft parameters passed to multiple libraries
     AP_Vehicle::MultiCopter aparm;
 
@@ -647,6 +655,7 @@ private:
     void update_batt_compass(void);
     void fourhundred_hz_logging();
     void ten_hz_logging_loop();
+    bool check_height(); //TM
     void twentyfive_hz_logging();
     void three_hz_loop();
     void one_hz_loop();
@@ -723,6 +732,9 @@ private:
     void set_mode_SmartRTL_or_land_with_pause(ModeReason reason);
     bool should_disarm_on_failsafe();
     void do_failsafe_action(Failsafe_Action action, ModeReason reason);
+    //TM
+    bool rock_running;
+    bool rock_first_iter;
 
     // failsafe.cpp
     void failsafe_enable();

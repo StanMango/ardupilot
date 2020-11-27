@@ -388,6 +388,21 @@ void Copter::fourhundred_hz_logging()
 // should be run at 10hz
 void Copter::ten_hz_logging_loop()
 {
+    //TM    
+    const uint32_t now = AP_HAL::millis();
+
+    // check if ready to rock (add more requirements and order them from more likely to less)
+    if (time_since_last_rock_ms > time_between_rocks_ms && hal.rcin->read(7)>1500 && check_height() && minimum_distance_cm <= wp_nav->get_wp_distance_to_destination()) {
+        //rock code
+        time_of_last_rock_ms = now;
+        gcs().send_text(MAV_SEVERITY_INFO, "Rock initiated");
+        copter.rock_running = true;
+    }
+
+
+    time_since_last_rock_ms = now - time_of_last_rock_ms;
+
+    
     // log attitude data if we're not already logging at the higher rate
     if (should_log(MASK_LOG_ATTITUDE_MED) && !should_log(MASK_LOG_ATTITUDE_FAST) && !copter.flightmode->logs_attitude()) {
         Log_Write_Attitude();
@@ -431,6 +446,16 @@ void Copter::ten_hz_logging_loop()
         g2.winch.write_log();
     }
 #endif
+}
+
+//Checks that height is above minimum_height_cm in order to perform a rock
+bool Copter::check_height() 
+{ 
+    if (copter.current_loc.get_alt_cm(Location::AltFrame::ABOVE_HOME, current_altitude)) {
+        return current_altitude >= minimum_height_cm;
+    } else {
+    return false;
+    }
 }
 
 // twentyfive_hz_logging - should be run at 25hz
